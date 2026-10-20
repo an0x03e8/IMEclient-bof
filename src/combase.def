@@ -1,0 +1,11 @@
+; combase.def -- the combase.dll surface src/wam.c needs. mingw-w64
+; 13-win32 ships no libcombase.a, so the Makefile dlltools this into
+; $(OBJ)/libcombase.a (see COMBASE_A there).
+LIBRARY combase.dll
+EXPORTS
+	RoInitialize
+	RoUninitialize
+	RoGetActivationFactory
+	WindowsCreateString
+	WindowsDeleteString
+	WindowsGetStringRawBuffer
